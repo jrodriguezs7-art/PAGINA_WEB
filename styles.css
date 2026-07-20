@@ -1,8 +1,14 @@
 /* ==========================================================================
    OpenAQ Environmental Monitor — styles.css
+   Paleta e identidad visual propias del proyecto (ver README para el
+   sistema de tokens). Sin frameworks CSS (Bootstrap, Tailwind, etc.):
+   todo el layout está resuelto con Flexbox/Grid nativos.
    ========================================================================== */
 
+/* --------------------------- 1. TOKENS DE DISEÑO ------------------------ */
 :root{
+  /* Paleta — "estación de monitoreo nocturna": azul profundo + verde óxido
+     de sensor + ámbar de alerta. Nada de morado/terracota genérico. */
   --ink-950:#5b7086;
   --ink-900:#0e2438;
   --ink-800:#123049;
@@ -18,7 +24,7 @@
   --ink-muted:#5b7086;
   --ink-faint:#8ca0b3;
 
-  --brand-500:#0f8b8d;
+  --brand-500:#0f8b8d;   /* teclado principal: verde-azulado "aire limpio" */
   --brand-600:#0c7274;
   --brand-100:#e1f4f2;
 
@@ -52,6 +58,7 @@
   *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
 }
 
+/* ------------------------------ 2. RESET -------------------------------- */
 *,*::before,*::after{ box-sizing:border-box; }
 html,body{ height:100%; }
 body{
@@ -71,6 +78,7 @@ input,select,button{ font-size:inherit; }
 img{ max-width:100%; display:block; }
 a{ color:var(--brand-600); }
 
+/* foco visible accesible en toda la app */
 :focus-visible{
   outline:3px solid var(--sensor-blue);
   outline-offset:2px;
@@ -86,12 +94,14 @@ a{ color:var(--brand-600); }
   white-space:nowrap;border:0;
 }
 
+/* ------------------------------ 3. LAYOUT -------------------------------- */
 .app{
   display:flex;
   flex-direction:column;
   min-height:100vh;
 }
 
+/* ---- Topbar ---- */
 .topbar{
   height:var(--topbar-h);
   flex:0 0 auto;
@@ -158,6 +168,7 @@ a{ color:var(--brand-600); }
   border:2px solid var(--ink-950);
 }
 
+/* ---- Shell: sidebar + main + panel ---- */
 .shell{
   flex:1 1 auto;
   display:flex;
@@ -165,6 +176,7 @@ a{ color:var(--brand-600); }
   min-height:0;
 }
 
+/* ---- Sidebar ---- */
 .sidebar{
   width:var(--sidebar-w);
   flex:0 0 auto;
@@ -207,10 +219,12 @@ a{ color:var(--brand-600); }
   border-top:1px solid rgba(255,255,255,.08);
 }
 
+/* sidebar colapsable (móvil / botón hamburguesa) */
 body.sidebar-collapsed .sidebar{
   margin-left:calc(var(--sidebar-w) * -1);
 }
 
+/* ---- Main content ---- */
 .main{
   flex:1 1 auto;
   min-width:0;
@@ -231,6 +245,11 @@ body.sidebar-collapsed .sidebar{
 .section-title h2{ font-size:15px; letter-spacing:.03em; text-transform:uppercase; color:var(--ink-700); }
 .section-title .hint{ font-size:12px; color:var(--ink-muted); }
 
+/* ---- Banner de conexión a la API (ELIMINADO) ---- */
+/* Los estilos que pertenecían al banner se han quitado para mantener
+   el código limpio, pero se conservan algunas reglas que podrían usarse
+   en el futuro si se reactiva la conexión. */
+
 .error-banner{
   background:var(--sensor-red-100);
   border:1px solid #f2c3c6;
@@ -245,6 +264,7 @@ body.sidebar-collapsed .sidebar{
 }
 .error-banner.is-hidden{ display:none; }
 
+/* ---- Cards grid ---- */
 .cards-grid{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
@@ -278,6 +298,7 @@ body.sidebar-collapsed .sidebar{
 .stat-card--alert .stat-card__value{ color:var(--sensor-red); }
 .stat-card--ok .stat-card__value{ color:var(--sensor-green); }
 
+/* anillo AQI (elemento firma, construido solo con conic-gradient) */
 .aqi-ring-row{ display:flex; align-items:center; gap:14px; }
 .aqi-ring{
   --ring-pct:0;
@@ -302,6 +323,7 @@ body.sidebar-collapsed .sidebar{
 }
 .aqi-ring-wrap{ position:relative; width:64px; height:64px; display:flex; align-items:center; justify-content:center; }
 
+/* ---- Mapa ---- */
 .map-card{ padding:0; overflow:hidden; }
 .map-card .card-head{
   display:flex;
@@ -312,6 +334,13 @@ body.sidebar-collapsed .sidebar{
   flex-wrap:wrap;
   gap:10px;
 }
+.map-legend{ display:flex; gap:14px; font-size:12px; color:var(--ink-muted); flex-wrap:wrap; }
+.map-legend span{ display:inline-flex; align-items:center; gap:6px; }
+.legend-dot{ width:10px;height:10px;border-radius:50%; display:inline-block; }
+.legend-dot--good{ background:var(--sensor-green); }
+.legend-dot--mod{ background:var(--sensor-amber); }
+.legend-dot--bad{ background:var(--sensor-red); }
+
 .map-wrapper{
   position:relative;
   width:100%;
@@ -323,6 +352,37 @@ body.sidebar-collapsed .sidebar{
   width:100%; height:100%;
   border:0;
   filter:saturate(.9);
+}
+.marker-layer{
+  position:absolute; inset:0;
+  pointer-events:none;
+}
+.marker{
+  position:absolute;
+  transform:translate(-50%,-100%);
+  pointer-events:auto;
+  width:22px;height:22px;
+  border:none;
+  background:transparent;
+  padding:0;
+}
+.marker__pin{
+  width:20px;height:20px;
+  border-radius:50% 50% 50% 0;
+  transform:rotate(-45deg);
+  background:var(--sensor-blue);
+  border:2px solid #fff;
+  box-shadow:0 2px 6px rgba(0,0,0,.35);
+  transition:transform var(--transition-fast);
+}
+.marker[data-level="moderado"] .marker__pin{ background:var(--sensor-amber); }
+.marker[data-level="malo"] .marker__pin{ background:var(--sensor-red); }
+.marker[data-level="bueno"] .marker__pin{ background:var(--sensor-green); }
+.marker:hover .marker__pin,
+.marker:focus-visible .marker__pin{ transform:rotate(-45deg) scale(1.25); }
+.marker.is-selected .marker__pin{
+  outline:3px solid var(--ink-950);
+  outline-offset:2px;
 }
 .map-controls{
   position:absolute;
@@ -350,6 +410,7 @@ body.sidebar-collapsed .sidebar{
 }
 .map-loading.is-hidden{ display:none; }
 
+/* ---- Tabla ---- */
 .table-card{ padding:0; }
 .table-card .card-head{
   display:flex; align-items:center; justify-content:space-between;
@@ -395,13 +456,12 @@ table.devices tbody tr.is-selected{ background:var(--brand-100); }
   width:9px;height:9px;border-radius:50%;
   display:inline-block; margin-right:6px;
 }
-.status-dot--on{ background:var(--sensor-green); }   /* verde */
-.status-dot--mod{ background:var(--sensor-amber); } /* amarillo */
-.status-dot--bad{ background:var(--sensor-red); }   /* rojo */
-.status-dot--off{ background:var(--ink-faint); }    /* gris (sin datos) */
+.status-dot--on{ background:var(--sensor-green); }
+.status-dot--off{ background:var(--ink-faint); }
 .status-pill{ display:inline-flex; align-items:center; font-size:12.5px; color:var(--ink-muted); }
 .empty-row td{ text-align:center; color:var(--ink-muted); padding:26px; }
 
+/* ---- Panel de detalle (aside) ---- */
 .detail-panel{
   width:var(--panel-w);
   flex:0 0 auto;
@@ -477,6 +537,7 @@ table.devices tbody tr.is-selected{ background:var(--brand-100); }
 .mini-chart .dot-pt{ fill:var(--sensor-blue); }
 .chart-empty{ font-size:12px; color:var(--ink-faint); padding:10px 0; text-align:center; }
 
+/* ---- toasts ---- */
 .toast-region{
   position:fixed; right:18px; bottom:18px;
   display:flex; flex-direction:column; gap:8px;
@@ -496,6 +557,7 @@ table.devices tbody tr.is-selected{ background:var(--brand-100); }
 .toast--success{ background:var(--sensor-green); }
 @keyframes toast-in{ from{ opacity:0; transform:translateY(8px);} to{ opacity:1; transform:translateY(0);} }
 
+/* ---- footer ---- */
 .app-footer{
   text-align:center;
   font-size:12px;
@@ -503,6 +565,7 @@ table.devices tbody tr.is-selected{ background:var(--brand-100); }
   padding:14px 0 26px;
 }
 
+/* ------------------------------ 4. RESPONSIVE ---------------------------- */
 @media (max-width:1180px){
   .detail-panel{
     position:fixed;
