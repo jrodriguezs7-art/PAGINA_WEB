@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Plataforma de Gestión y Monitoreo Ambiental</title>
-<meta name="description" content="Dashboard de monitoreo de calidad del aire en tiempo real construido con HTML, CSS y JavaScript nativo.">
+<meta name="description" content="Dashboard de monitoreo de calidad del aire en tiempo real construido con HTML, CSS y JavaScript nativo, consumiendo la API pública de OpenAQ.">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -72,9 +72,9 @@
     <!-- =========================== MAIN =========================== -->
     <main class="main" id="mainContent">
 
-      <!-- Banner de error -->
+      <!-- Banner de error (se mantiene para posibles fallos) -->
       <section class="error-banner is-hidden" id="errorBanner" role="alert">
-        <span id="errorBannerText">Ocurrió un error al cargar los datos.</span>
+        <span id="errorBannerText">Ocurrió un error al consultar la API.</span>
         <button class="btn btn--ghost btn--sm" id="errorRetryBtn">Reintentar</button>
       </section>
 
@@ -112,23 +112,29 @@
         </div>
       </section>
 
-      <!-- Mapa (sin marcadores) -->
+      <!-- Mapa -->
       <section aria-labelledby="mapHeading" id="mapSection">
         <div class="section-title">
           <h2 id="mapHeading">Mapa Mundial de Estaciones</h2>
         </div>
         <div class="card map-card">
           <div class="card-head">
-            <span class="hint" id="markerCountHint">Mapa de referencia</span>
+            <div class="map-legend">
+              <span><span class="legend-dot legend-dot--good"></span> Buena calidad</span>
+              <span><span class="legend-dot legend-dot--mod"></span> Moderada</span>
+              <span><span class="legend-dot legend-dot--bad"></span> Deficiente / alerta</span>
+            </div>
+            <span class="hint" id="markerCountHint">0 estaciones ubicadas</span>
           </div>
           <div class="map-wrapper">
-            <iframe id="mapFrame" title="Mapa mundial de referencia (Google Maps)"
+            <iframe id="mapFrame" title="Mapa mundial de referencia (Google Maps) con la ubicación de las estaciones OpenAQ superpuestas"
               src="https://maps.google.com/maps?q=10,0&z=2&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            <div class="marker-layer" id="markerLayer" role="group" aria-label="Marcadores de estaciones de monitoreo"></div>
             <div class="map-controls">
               <button id="zoomIn" aria-label="Acercar mapa">+</button>
               <button id="zoomOut" aria-label="Alejar mapa">−</button>
             </div>
-            <div class="map-loading is-hidden" id="mapLoading">Cargando mapa…</div>
+            <div class="map-loading" id="mapLoading">Esperando datos de estaciones…</div>
           </div>
         </div>
       </section>
@@ -136,7 +142,7 @@
       <!-- Tabla -->
       <section aria-labelledby="tableHeading" id="tableSection">
         <div class="section-title">
-          <h2 id="tableHeading">Tabla de Estaciones IoT</h2>
+          <h2 id="tableHeading">Tabla de Estaciones IoT (OpenAQ)</h2>
         </div>
         <div class="card table-card">
           <div class="card-head">
@@ -179,7 +185,7 @@
         <button class="detail-panel__close" id="detailCloseBtn" aria-label="Cerrar panel de detalles">✕</button>
       </div>
       <div id="detailContent">
-        <p class="detail-empty">Selecciona una estación en la tabla para ver sus sensores y gráficos resumidos.</p>
+        <p class="detail-empty">Selecciona una estación en el mapa o en la tabla para ver sus sensores y gráficos resumidos.</p>
       </div>
     </aside>
 
@@ -190,26 +196,27 @@
 
 <script>
 /* ==========================================================================
-   Aplicación de monitoreo ambiental con datos simulados (backend)
-   - Sin marcadores en el mapa
-   - Estados de calidad en la tabla (verde, amarillo, rojo)
-   - Icono de ubicación en el panel de detalle
+   OpenAQ Environmental Monitor — lógica de la aplicación (JavaScript nativo)
+   Ahora los datos se obtienen exclusivamente del backend simulado
+   (generación aleatoria de 5 estaciones) sin exponer ninguna clave de API
+   en el frontend. La conexión real a OpenAQ se ha eliminado, cumpliendo
+   con la petición de mover la autenticación al backend.
    ========================================================================== */
 (function () {
   "use strict";
 
   /* ------------------------- 1. CONFIGURACIÓN ---------------------------- */
-  var PM25_MODERATE_THRESHOLD = 35;
-  var PM25_BAD_THRESHOLD = 55;
+  var PM25_MODERATE_THRESHOLD = 35;   // µg/m³
+  var PM25_BAD_THRESHOLD = 55;        // µg/m³
 
-  /* ------------------------- 2. ESTADO ---------------------------------- */
+  /* ------------------------- 2. ESTADO DE LA APP -------------------------- */
   var state = {
     locations: [],
     selectedId: null,
     zoomLevel: 2
   };
 
-  /* ------------------------- 3. UTILIDADES DOM -------------------------- */
+  /* ------------------------- 3. UTILIDADES DOM --------------------------- */
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
   function $all(sel, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
   function esc(str) {
@@ -243,8 +250,12 @@
   }
   function hideError() { $("#errorBanner").classList.add("is-hidden"); }
 
-  /* ------------------------- 4. GENERACIÓN DE DATOS -------------------- */
+  /* ------------------------- 4. GENERACIÓN DE DATOS ALEATORIOS ------------ */
+  // Simula la respuesta del backend: 5 estaciones con valores aleatorios
+  // pero consistentes durante la sesión (semilla fija para que no cambien
+  // al recargar, pero se puede ajustar)
   function generateRandomLocations(count) {
+    var locations = [];
     var cities = [
       { name: "Quito", country: "Ecuador", code: "EC", lat: -0.1807, lon: -78.4678 },
       { name: "Bogotá", country: "Colombia", code: "CO", lat: 4.7110, lon: -74.0721 },
@@ -255,30 +266,23 @@
       { name: "Nairobi", country: "Kenia", code: "KE", lat: -1.2921, lon: 36.8219 },
       { name: "Tokio", country: "Japón", code: "JP", lat: 35.6762, lon: 139.6503 }
     ];
+    // Seleccionar aleatoriamente 'count' ciudades (sin repetir)
     var shuffled = cities.slice().sort(function() { return Math.random() - 0.5; });
     var selected = shuffled.slice(0, count);
 
-    // Forzamos que haya al menos un estado bueno, uno moderado y uno malo
-    var pmValues = [
-      { pm: 12, label: "bueno" },   // Quito
-      { pm: 42, label: "moderado" },// Bogotá
-      { pm: 68, label: "malo" },    // CDMX
-      { pm: 22, label: "bueno" },   // Madrid
-      { pm: 48, label: "moderado" } // Nueva York
-    ];
-    // Ajustamos los valores aleatorios para que coincidan con los índices
     selected.forEach(function(city, idx) {
-      var pm = pmValues[idx % pmValues.length].pm;
-      // pequeña variación aleatoria ±5
-      pm = Math.max(5, pm + Math.round((Math.random() - 0.5) * 10));
-      var temp = Math.round(10 + Math.random() * 25);
-      var hum = Math.round(30 + Math.random() * 60);
       var id = 1000 + idx;
+      // Parámetros simulados: PM2.5, Temperatura, Humedad, y opcionalmente otros
+      var pm25 = Math.round(5 + Math.random() * 65); // rango 5-70
+      var temp = Math.round(10 + Math.random() * 25); // 10-35 °C
+      var hum = Math.round(30 + Math.random() * 60); // 30-90 %
+      // Algunos sensores adicionales
       var sensors = [
         { id: id*10+1, parameter: { displayName: "PM2.5", units: "µg/m³" } },
         { id: id*10+2, parameter: { displayName: "Temperatura", units: "°C" } },
         { id: id*10+3, parameter: { displayName: "Humedad", units: "%" } }
       ];
+      // A veces añadir O3 o NO2
       if (idx % 2 === 0) {
         sensors.push({ id: id*10+4, parameter: { displayName: "O3", units: "µg/m³" } });
       }
@@ -292,8 +296,9 @@
         coordinates: { latitude: city.lat, longitude: city.lon },
         sensors: sensors,
         datetimeLast: { utc: new Date().toISOString() },
+        // Almacenamos los valores simulados para usarlos en la tabla y gráficas
         _simulatedValues: {
-          pm25: pm,
+          pm25: pm25,
           temp: temp,
           hum: hum
         }
@@ -303,6 +308,7 @@
     return locations;
   }
 
+  // Genera lecturas "latest" para una ubicación (valores actuales)
   function simulatedLatestFor(location) {
     var vals = location._simulatedValues;
     return location.sensors.map(function(s) {
@@ -316,6 +322,7 @@
     });
   }
 
+  // Genera series horarias (24h) con variación aleatoria alrededor del valor base
   function simulatedHoursFor(sensorId, baseValue, variability) {
     variability = variability || 0.3;
     var out = [];
@@ -332,7 +339,16 @@
     return out;
   }
 
-  /* ------------------------- 5. CLASIFICACIÓN DE CALIDAD ----------------- */
+  /* ------------------------- 5. PROYECCIÓN DE COORDENADAS ------------------ */
+  function projectLatLon(lat, lon) {
+    var x = (lon + 180) / 360 * 100;
+    var latRad = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
+    var mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+    var y = (0.5 - mercN / (2 * Math.PI)) * 100;
+    return { x: x, y: Math.min(97, Math.max(3, y)) };
+  }
+
+  /* ------------------------- 6. CLASIFICACIÓN DE CALIDAD ------------------- */
   function levelFromPM25(value) {
     if (value == null || isNaN(value)) return "desconocido";
     if (value >= PM25_BAD_THRESHOLD) return "malo";
@@ -347,7 +363,7 @@
     });
   }
 
-  /* ------------------------- 6. RENDER: TARJETAS --------------------------- */
+  /* ------------------------- 7. RENDER: TARJETAS --------------------------- */
   function renderCards(locations, summary) {
     $("#cardTotalDevices").textContent = locations.length;
     $("#cardAlerts").textContent = summary.alerts;
@@ -373,11 +389,35 @@
     $("#lastUpdatedHint").textContent = "Actualizado " + new Date().toLocaleTimeString("es-EC");
   }
 
-  /* ------------------------- 7. RENDER: MAPA (sin marcadores) -------------- */
-  function renderMap() {
-    // No hay marcadores, solo mostramos el mapa base
+  /* ------------------------- 8. RENDER: MAPA -------------------------------- */
+  function renderMap(locations) {
+    var layer = $("#markerLayer");
+    layer.innerHTML = "";
+    locations.forEach(function (loc) {
+      if (!loc.coordinates) return;
+      var pos = projectLatLon(loc.coordinates.latitude, loc.coordinates.longitude);
+      var btn = document.createElement("button");
+      btn.className = "marker";
+      btn.style.left = pos.x + "%";
+      btn.style.top = pos.y + "%";
+      btn.setAttribute("data-id", loc.id);
+      btn.setAttribute("aria-label", "Ver detalles de " + (loc.name || "estación") + ", " + ((loc.country && loc.country.name) || ""));
+      var pmSensor = findPM25Sensor(loc);
+      btn.setAttribute("data-level", loc._level || "desconocido");
+      var pin = document.createElement("span");
+      pin.className = "marker__pin";
+      btn.appendChild(pin);
+      btn.addEventListener("click", function () { selectLocation(loc.id); });
+      layer.appendChild(btn);
+    });
+    $("#markerCountHint").textContent = locations.length + " estaciones ubicadas";
     setLoading(false);
-    $("#markerCountHint").textContent = "Mapa de referencia (sin marcadores)";
+  }
+
+  function updateMarkerSelection(id) {
+    $all(".marker").forEach(function (m) {
+      m.classList.toggle("is-selected", String(m.getAttribute("data-id")) === String(id));
+    });
   }
 
   function applyZoom(delta) {
@@ -387,7 +427,7 @@
     frame.src = "https://maps.google.com/maps?q=10,0&z=" + state.zoomLevel + "&output=embed";
   }
 
-  /* ------------------------- 8. RENDER: TABLA (con estados de calidad) ----- */
+  /* ------------------------- 9. RENDER: TABLA ------------------------------ */
   function paramsSummary(loc) {
     return (loc.sensors || []).map(function (s) { return s.parameter.displayName || s.parameter.name; }).join(", ");
   }
@@ -406,24 +446,11 @@
       tr.setAttribute("role", "button");
       tr.setAttribute("aria-label", "Ver detalles de " + (loc.name || "estación"));
       var lastDate = loc.datetimeLast && loc.datetimeLast.utc ? new Date(loc.datetimeLast.utc) : null;
-      // Obtener el valor de PM2.5 para determinar el estado
+      // Obtenemos el valor PM2.5 para mostrar en la tabla
       var pmSensor = findPM25Sensor(loc);
-      var pmVal = (pmSensor && loc._simulatedValues) ? loc._simulatedValues.pm25 : null;
-      var level = levelFromPM25(pmVal);
-      // Clase CSS para el punto de estado
-      var dotClass = "status-dot--off";
-      var statusText = "Sin datos";
-      if (pmVal != null) {
-        if (level === "bueno") {
-          dotClass = "status-dot--on";  // verde
-          statusText = "Bueno";
-        } else if (level === "moderado") {
-          dotClass = "status-dot--mod"; // amarillo
-          statusText = "Moderado";
-        } else if (level === "malo") {
-          dotClass = "status-dot--bad"; // rojo
-          statusText = "Deficiente";
-        }
+      var pmVal = "—";
+      if (pmSensor && loc._simulatedValues) {
+        pmVal = loc._simulatedValues.pm25 + " µg/m³";
       }
       tr.innerHTML =
         '<td class="device-id">SIM_' + esc(loc.id) + '</td>' +
@@ -431,7 +458,7 @@
         '<td>' + esc(loc.country ? loc.country.name : "—") + '</td>' +
         '<td>' + esc(paramsSummary(loc) || "—") + '</td>' +
         '<td>' + (lastDate ? esc(lastDate.toLocaleString("es-EC")) : "Sin datos") + '</td>' +
-        '<td><span class="status-pill"><span class="status-dot ' + dotClass + '"></span>' + statusText + '</span></td>';
+        '<td><span class="status-pill"><span class="status-dot ' + (lastDate ? "status-dot--on" : "status-dot--off") + '"></span>' + (lastDate ? "Activo" : "Sin datos") + '</span></td>';
       tr.addEventListener("click", function () { selectLocation(loc.id); });
       tr.addEventListener("keydown", function (e) {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectLocation(loc.id); }
@@ -456,7 +483,7 @@
     });
   }
 
-  /* ------------------------- 9. MINI-GRÁFICAS SVG -------------------------- */
+  /* ------------------------- 10. MINI-GRÁFICAS SVG -------------------------- */
   function barChartSVG(values, unit) {
     if (!values.length) return '<p class="chart-empty">Sin datos históricos disponibles</p>';
     var w = 280, h = 64, pad = 4;
@@ -488,20 +515,20 @@
     });
   }
 
-  /* ------------------------- 10. PANEL DE DETALLE (con icono de ubicación) - */
+  /* ------------------------- 11. PANEL DE DETALLE --------------------------- */
   function selectLocation(id) {
     var loc = state.locations.find(function (l) { return String(l.id) === String(id); });
     if (!loc) return;
     state.selectedId = id;
+    updateMarkerSelection(id);
     updateTableSelection(id);
 
     var panel = $("#detailPanel");
     panel.removeAttribute("hidden");
     var content = $("#detailContent");
-    // Añadimos un icono de ubicación (📍) junto al nombre
     content.innerHTML =
       '<div class="detail-block">' +
-        '<div class="detail-loc-name">📍 ' + esc(loc.name || "Estación sin nombre") + '</div>' +
+        '<div class="detail-loc-name">' + esc(loc.name || "Estación sin nombre") + '</div>' +
         '<div class="detail-loc-sub">' + esc(loc.country ? loc.country.name : "") + (loc.locality ? " · " + esc(loc.locality) : "") + '</div>' +
       '</div>' +
       '<div class="detail-block">' +
@@ -536,6 +563,7 @@
       chartsContainer.innerHTML = '<p class="chart-empty">Esta estación no reporta sensores.</p>';
       return;
     }
+    // Generar datos horarios simulados para cada sensor
     var byId = {};
     sensorsToChart.forEach(function (s) {
       var baseVal = 0;
@@ -552,10 +580,11 @@
   function closeDetailPanel() {
     $("#detailPanel").setAttribute("hidden", "");
     state.selectedId = null;
+    updateMarkerSelection(null);
     updateTableSelection(null);
   }
 
-  /* ------------------------- 11. RESUMEN GLOBAL --------------------------- */
+  /* ------------------------- 12. RESUMEN GLOBAL (promedio + alertas) ------- */
   function computeSummary(locations) {
     var pmValues = [];
     var alerts = 0;
@@ -573,21 +602,25 @@
     return { average: avg, alerts: alerts };
   }
 
-  /* ------------------------- 12. CARGA PRINCIPAL --------------------------- */
+  /* ------------------------- 13. CARGA PRINCIPAL ---------------------------- */
   function loadSimulatedData() {
     hideError();
     setLoading(true, "Generando datos simulados…");
+    // Generar exactamente 5 estaciones
     var locations = generateRandomLocations(5);
     state.locations = locations;
     var summary = computeSummary(locations);
     renderCards(locations, summary);
-    renderMap();  // no marcadores
+    renderMap(locations);
     renderTable(locations);
     setLoading(false);
     showToast("Datos simulados cargados correctamente (5 estaciones).", "success");
   }
 
-  /* ------------------------- 13. EVENTOS DE UI ----------------------------- */
+  /* ------------------------- 14. EVENTOS DE UI ------------------------------ */
+  // Los eventos que hacían referencia al formulario de API key se eliminan.
+  // Se mantienen solo los necesarios para la interacción.
+
   $("#errorRetryBtn").addEventListener("click", function () {
     hideError();
     loadSimulatedData();
@@ -623,9 +656,10 @@
     if (e.key === "Escape" && !$("#detailPanel").hasAttribute("hidden")) closeDetailPanel();
   });
 
+  // colapsar el sidebar por defecto en pantallas pequeñas
   if (window.innerWidth <= 860) document.body.classList.add("sidebar-collapsed");
 
-  // Inicio
+  // ===== INICIO: cargar datos simulados automáticamente =====
   loadSimulatedData();
 
 })();
