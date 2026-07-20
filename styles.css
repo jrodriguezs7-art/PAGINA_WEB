@@ -334,6 +334,8 @@ body.sidebar-collapsed .sidebar{
   width:100%; height:100%;
   border:0;
   filter:saturate(.9);
+  /* 🔽 NUEVA LÍNEA: evita que el usuario arrastre el mapa y desalinee los marcadores */
+  pointer-events: none;
 }
 .marker-layer{
   position:absolute; inset:0;
