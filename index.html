@@ -114,18 +114,24 @@
         </div>
       </section>
 
-      <!-- Mapa (sin marcadores) -->
+      <!-- Mapa con marcadores -->
       <section aria-labelledby="mapHeading" id="mapSection">
         <div class="section-title">
           <h2 id="mapHeading">Mapa Mundial de Estaciones</h2>
         </div>
         <div class="card map-card">
           <div class="card-head">
-            <span class="hint" id="markerCountHint">Mapa de referencia</span>
+            <div class="map-legend">
+              <span><span class="legend-dot legend-dot--good"></span> Buena calidad</span>
+              <span><span class="legend-dot legend-dot--mod"></span> Moderada</span>
+              <span><span class="legend-dot legend-dot--bad"></span> Deficiente / alerta</span>
+            </div>
+            <span class="hint" id="markerCountHint">0 estaciones ubicadas</span>
           </div>
           <div class="map-wrapper">
             <iframe id="mapFrame" title="Mapa mundial de referencia (Google Maps)"
               src="https://maps.google.com/maps?q=10,0&z=2&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            <div class="marker-layer" id="markerLayer" role="group" aria-label="Marcadores de estaciones de monitoreo"></div>
             <div class="map-controls">
               <button id="zoomIn" aria-label="Acercar mapa">+</button>
               <button id="zoomOut" aria-label="Alejar mapa">−</button>
@@ -181,7 +187,7 @@
         <button class="detail-panel__close" id="detailCloseBtn" aria-label="Cerrar panel de detalles">✕</button>
       </div>
       <div id="detailContent">
-        <p class="detail-empty">Selecciona una estación en la tabla para ver sus sensores y gráficos resumidos.</p>
+        <p class="detail-empty">Selecciona una estación en el mapa o en la tabla para ver sus sensores y gráficos resumidos.</p>
       </div>
     </aside>
 
@@ -193,10 +199,8 @@
 <script>
 /* ==========================================================================
    Aplicación de monitoreo ambiental con datos persistentes (localStorage)
-   - Los datos se generan una sola vez y se guardan
-   - Sin marcadores en el mapa
-   - Estados de calidad en la tabla (verde, amarillo, rojo)
-   - Icono de ubicación en el panel de detalle
+   - Marcadores en el mapa con colores según calidad
+   - Panel de detalles completo con icono de ubicación
    ========================================================================== */
 (function () {
   "use strict";
@@ -247,7 +251,16 @@
   }
   function hideError() { $("#errorBanner").classList.add("is-hidden"); }
 
-  /* ------------------------- 4. GENERACIÓN DE DATOS (semilla fija) ------ */
+  /* ------------------------- 4. PROYECCIÓN Web Mercator ------------------ */
+  function projectLatLon(lat, lon) {
+    var x = (lon + 180) / 360 * 100;
+    var latRad = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
+    var mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+    var y = (0.5 - mercN / (2 * Math.PI)) * 100;
+    return { x: x, y: Math.min(97, Math.max(3, y)) };
+  }
+
+  /* ------------------------- 5. GENERACIÓN DE DATOS (semilla fija) ------ */
   function generateLocations(count) {
     var cities = [
       { name: "Quito", country: "Ecuador", code: "EC", lat: -0.1807, lon: -78.4678 },
@@ -305,7 +318,6 @@
     if (stored) {
       try {
         var parsed = JSON.parse(stored);
-        // Restaurar fechas
         parsed.forEach(function(loc) {
           if (loc.datetimeLast && loc.datetimeLast.utc) {
             loc.datetimeLast.utc = new Date(loc.datetimeLast.utc).toISOString();
@@ -313,7 +325,7 @@
         });
         return parsed;
       } catch(e) {
-        // Si falla, generar nuevos
+        // fallback
       }
     }
     var fresh = generateLocations(5);
@@ -350,7 +362,7 @@
     return out;
   }
 
-  /* ------------------------- 5. CLASIFICACIÓN DE CALIDAD ----------------- */
+  /* ------------------------- 6. CLASIFICACIÓN DE CALIDAD ----------------- */
   function levelFromPM25(value) {
     if (value == null || isNaN(value)) return "desconocido";
     if (value >= PM25_BAD_THRESHOLD) return "malo";
@@ -365,7 +377,7 @@
     });
   }
 
-  /* ------------------------- 6. RENDER: TARJETAS --------------------------- */
+  /* ------------------------- 7. RENDER: TARJETAS --------------------------- */
   function renderCards(locations, summary) {
     var total = locations.length;
     var active = locations.filter(function(l) { return l.datetimeLast && l.datetimeLast.utc; }).length;
@@ -396,10 +408,44 @@
     $("#lastUpdatedHint").textContent = "Actualizado " + new Date().toLocaleTimeString("es-EC");
   }
 
-  /* ------------------------- 7. RENDER: MAPA (sin marcadores) -------------- */
-  function renderMap() {
+  /* ------------------------- 8. RENDER: MAPA CON MARCADORES -------------- */
+  function renderMap(locations) {
+    var layer = $("#markerLayer");
+    layer.innerHTML = "";
+    if (!locations || !locations.length) {
+      $("#markerCountHint").textContent = "0 estaciones ubicadas";
+      return;
+    }
+    locations.forEach(function (loc) {
+      if (!loc.coordinates) return;
+      var pos = projectLatLon(loc.coordinates.latitude, loc.coordinates.longitude);
+      var btn = document.createElement("button");
+      btn.className = "marker";
+      btn.style.left = pos.x + "%";
+      btn.style.top = pos.y + "%";
+      btn.setAttribute("data-id", loc.id);
+      btn.setAttribute("aria-label", "Ver detalles de " + (loc.name || "estación") + ", " + ((loc.country && loc.country.name) || ""));
+      // Color según nivel
+      var level = loc._level || "desconocido";
+      btn.setAttribute("data-level", level);
+      // Pin simple (círculo con borde)
+      var pin = document.createElement("span");
+      pin.className = "marker__pin";
+      btn.appendChild(pin);
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        selectLocation(loc.id);
+      });
+      layer.appendChild(btn);
+    });
+    $("#markerCountHint").textContent = locations.length + " estaciones ubicadas";
     setLoading(false);
-    $("#markerCountHint").textContent = "Mapa de referencia (sin marcadores)";
+  }
+
+  function updateMarkerSelection(id) {
+    $all(".marker").forEach(function (m) {
+      m.classList.toggle("is-selected", String(m.getAttribute("data-id")) === String(id));
+    });
   }
 
   function applyZoom(delta) {
@@ -409,7 +455,7 @@
     frame.src = "https://maps.google.com/maps?q=10,0&z=" + state.zoomLevel + "&output=embed";
   }
 
-  /* ------------------------- 8. RENDER: TABLA (con estados de calidad) ----- */
+  /* ------------------------- 9. RENDER: TABLA (con estados de calidad) ----- */
   function paramsSummary(loc) {
     return (loc.sensors || []).map(function (s) { return s.parameter.displayName || s.parameter.name; }).join(", ");
   }
@@ -476,7 +522,7 @@
     });
   }
 
-  /* ------------------------- 9. MINI-GRÁFICAS SVG -------------------------- */
+  /* ------------------------- 10. MINI-GRÁFICAS SVG -------------------------- */
   function barChartSVG(values, unit) {
     if (!values.length) return '<p class="chart-empty">Sin datos históricos disponibles</p>';
     var w = 280, h = 64, pad = 4;
@@ -508,17 +554,17 @@
     });
   }
 
-  /* ------------------------- 10. PANEL DE DETALLE (con icono de ubicación) - */
+  /* ------------------------- 11. PANEL DE DETALLE (con icono de ubicación) - */
   function selectLocation(id) {
     var loc = state.locations.find(function (l) { return String(l.id) === String(id); });
     if (!loc) return;
     state.selectedId = id;
+    updateMarkerSelection(id);
     updateTableSelection(id);
 
     var panel = $("#detailPanel");
     panel.removeAttribute("hidden");
     var content = $("#detailContent");
-    // Icono de ubicación y nombre
     content.innerHTML =
       '<div class="detail-block">' +
         '<div class="detail-loc-name">📍 ' + esc(loc.name || "Estación sin nombre") + '</div>' +
@@ -572,10 +618,11 @@
   function closeDetailPanel() {
     $("#detailPanel").setAttribute("hidden", "");
     state.selectedId = null;
+    updateMarkerSelection(null);
     updateTableSelection(null);
   }
 
-  /* ------------------------- 11. RESUMEN GLOBAL --------------------------- */
+  /* ------------------------- 12. RESUMEN GLOBAL --------------------------- */
   function computeSummary(locations) {
     var pmValues = [];
     var alerts = 0;
@@ -593,7 +640,7 @@
     return { average: avg, alerts: alerts };
   }
 
-  /* ------------------------- 12. CARGA PRINCIPAL --------------------------- */
+  /* ------------------------- 13. CARGA PRINCIPAL --------------------------- */
   function loadData() {
     hideError();
     setLoading(true, "Cargando datos persistentes…");
@@ -601,13 +648,13 @@
     state.locations = locations;
     var summary = computeSummary(locations);
     renderCards(locations, summary);
-    renderMap();
+    renderMap(locations);
     renderTable(locations);
     setLoading(false);
     showToast("Datos cargados desde almacenamiento local.", "success");
   }
 
-  /* ------------------------- 13. EVENTOS DE UI ----------------------------- */
+  /* ------------------------- 14. EVENTOS DE UI ----------------------------- */
   $("#errorRetryBtn").addEventListener("click", function () {
     hideError();
     loadData();
