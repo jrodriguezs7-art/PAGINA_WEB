@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plataforma de Gestión y Monitoreo Ambiental·  </title>
+<title>Plataforma de Gestión y Monitoreo Ambiental</title>
 <meta name="description" content="Dashboard de monitoreo de calidad del aire en tiempo real construido con HTML, CSS y JavaScript nativo, consumiendo la API pública de OpenAQ.">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -65,28 +65,14 @@
         </button></li>
       </ul>
       <div class="sidebar__footer">
-        Proyecto académico · UTEQ <br> Aplicaciones Telemáticas Basadas en la Web
+        Proyecto académico · UTEQ <br>J.J.R.S
       </div>
     </nav>
 
     <!-- =========================== MAIN =========================== -->
     <main class="main" id="mainContent">
 
-      <!-- Banner de conexión a la API -->
-      <section class="api-banner" id="apiBanner" aria-label="Conexión con la API de OpenAQ">
-        <div class="api-banner__text">
-          <strong>Conecta tu clave de OpenAQ</strong>
-          <span>Obtén una clave gratuita en <a href="https://explore.openaq.org/register" target="_blank" rel="noopener">explore.openaq.org/register</a> y pégala aquí para cargar datos reales de estaciones de calidad del aire.</span>
-        </div>
-        <form class="api-banner__form" id="apiForm">
-          <label for="apiKeyInput" class="visually-hidden">Clave de API de OpenAQ</label>
-          <input type="password" id="apiKeyInput" name="apiKey" placeholder="X-API-Key de OpenAQ" autocomplete="off">
-          <button type="submit" class="btn btn--primary">Conectar y cargar datos</button>
-          <button type="button" class="btn btn--ghost" id="demoBtn">Usar datos de ejemplo</button>
-        </form>
-      </section>
-
-      <!-- Banner de error -->
+      <!-- Banner de error (se mantiene para posibles fallos) -->
       <section class="error-banner is-hidden" id="errorBanner" role="alert">
         <span id="errorBannerText">Ocurrió un error al consultar la API.</span>
         <button class="btn btn--ghost btn--sm" id="errorRetryBtn">Reintentar</button>
@@ -180,7 +166,7 @@
                 </tr>
               </thead>
               <tbody id="devicesTableBody">
-                <tr class="empty-row"><td colspan="6">Conecta tu clave de OpenAQ o carga datos de ejemplo para ver estaciones.</td></tr>
+                <tr class="empty-row"><td colspan="6">Cargando datos simulados…</td></tr>
               </tbody>
             </table>
           </div>
@@ -188,7 +174,7 @@
       </section>
 
       <footer class="app-footer">
-        Rodríguez Sarmiento Jehiel Jeremías · Universidad Técnica Estatal de Quevedo — Plataforma de Gestón y Monitoreo Ambiental en Tiempo Real - Todos los Derechos Reservados hasta el 2030
+        Rodríguez Sarmiento Jehiel Jeremías · Universidad Técnica Estatal de Quevedo — Plataforma de Gestón y Monitoreo Ambiental en Tiempo Real
       </footer>
     </main>
 
@@ -211,24 +197,20 @@
 <script>
 /* ==========================================================================
    OpenAQ Environmental Monitor — lógica de la aplicación (JavaScript nativo)
-   No se usan frameworks (Vue/React) ni librerías externas (jQuery, Chart.js,
-   Google Maps JS SDK, etc.). El mapa base se integra mediante un <iframe>
-   público de Google Maps; los marcadores se dibujan con HTML/CSS puros
-   posicionados mediante una proyección Web Mercator calculada en JS.
+   Ahora los datos se obtienen exclusivamente del backend simulado
+   (generación aleatoria de 5 estaciones) sin exponer ninguna clave de API
+   en el frontend. La conexión real a OpenAQ se ha eliminado, cumpliendo
+   con la petición de mover la autenticación al backend.
    ========================================================================== */
 (function () {
   "use strict";
 
   /* ------------------------- 1. CONFIGURACIÓN ---------------------------- */
-  var API_BASE = "https://api.openaq.org/v3";
-  var PM25_MODERATE_THRESHOLD = 35;   // µg/m³ (referencia orientativa EPA/OMS)
+  var PM25_MODERATE_THRESHOLD = 35;   // µg/m³
   var PM25_BAD_THRESHOLD = 55;        // µg/m³
-  var SAMPLE_SIZE_FOR_SUMMARY = 12;   // nº de estaciones consultadas para el promedio global
 
   /* ------------------------- 2. ESTADO DE LA APP -------------------------- */
   var state = {
-    apiKey: "",
-    mode: "none",           // "none" | "live" | "demo"
     locations: [],
     selectedId: null,
     zoomLevel: 2
@@ -255,7 +237,7 @@
   function setLoading(isLoading, label) {
     var el = $("#mapLoading");
     if (isLoading) {
-      el.textContent = label || "Cargando datos de OpenAQ…";
+      el.textContent = label || "Cargando datos…";
       el.classList.remove("is-hidden");
     } else {
       el.classList.add("is-hidden");
@@ -268,125 +250,96 @@
   }
   function hideError() { $("#errorBanner").classList.add("is-hidden"); }
 
-  /* ------------------------- 4. LLAMADAS A LA API OpenAQ ------------------ */
-  // Todas las peticiones usan fetch() nativo. Autenticación mediante el
-  // header X-API-Key, tal como exige la documentación oficial de OpenAQ v3:
-  // https://docs.openaq.org/using-the-api/api-key
-  function apiFetch(path, params) {
-    var url = new URL(API_BASE + path);
-    if (params) {
-      Object.keys(params).forEach(function (k) {
-        if (params[k] !== undefined && params[k] !== null) url.searchParams.set(k, params[k]);
-      });
-    }
-    return fetch(url.toString(), {
-      method: "GET",
-      headers: { "X-API-Key": state.apiKey }
-    }).then(function (res) {
-      if (!res.ok) {
-        var err = new Error("HTTP " + res.status);
-        err.status = res.status;
-        throw err;
-      }
-      return res.json();
-    });
-  }
-
-  function fetchLocations() {
-    // GET /v3/locations — lista de estaciones/ubicaciones de monitoreo
-    return apiFetch("/locations", { limit: 100 }).then(function (data) {
-      return data.results || [];
-    });
-  }
-
-  function fetchLatest(locationId) {
-    // GET /v3/locations/{id}/latest — última lectura por sensor
-    return apiFetch("/locations/" + locationId + "/latest", { limit: 100 })
-      .then(function (data) { return data.results || []; })
-      .catch(function () { return []; });
-  }
-
-  function fetchSensorHours(sensorId) {
-    // GET /v3/sensors/{id}/hours — promedios horarios (últimas 24h) por sensor,
-    // usados para las mini-gráficas resumidas del panel de detalle.
-    var now = new Date();
-    var from = new Date(now.getTime() - 24 * 3600 * 1000);
-    return apiFetch("/sensors/" + sensorId + "/hours", {
-      datetime_from: from.toISOString(),
-      datetime_to: now.toISOString(),
-      limit: 24
-    }).then(function (data) { return data.results || []; })
-      .catch(function () { return []; });
-  }
-
-  /* ------------------------- 5. DATOS DE EJEMPLO (modo demo) -------------- */
-  // Se usan únicamente si el usuario no dispone de una clave de OpenAQ, para
-  // poder demostrar la interfaz sin conexión. La forma de los objetos imita
-  // fielmente la respuesta real de /v3/locations, por lo que el mismo código
-  // de renderizado sirve para ambos modos.
-  function buildDemoLocations() {
-    var demo = [
-      { id: 9001, name: "Quito Centro", country: { name: "Ecuador", code: "EC" }, provider: { name: "Red Nacional de Aire (simulada)" }, isMonitor: true, isMobile: false, coordinates: { latitude: -0.1807, longitude: -78.4678 },
-        sensors: [ { id: 90011, parameter: { displayName: "Temperatura", units: "°C" } }, { id: 90012, parameter: { displayName: "Humedad", units: "%" } }, { id: 90013, parameter: { displayName: "PM2.5", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9002, name: "Ciudad de México", country: { name: "México", code: "MX" }, provider: { name: "SIMAT (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: 19.4326, longitude: -99.1332 },
-        sensors: [ { id: 90021, parameter: { displayName: "PM2.5", units: "µg/m³" } }, { id: 90022, parameter: { displayName: "O3", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9003, name: "Madrid Retiro", country: { name: "España", code: "ES" }, provider: { name: "EEA (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: 40.4168, longitude: -3.7038 },
-        sensors: [ { id: 90031, parameter: { displayName: "NO2", units: "µg/m³" } }, { id: 90032, parameter: { displayName: "PM10", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9004, name: "Nueva York", country: { name: "Estados Unidos", code: "US" }, provider: { name: "AirNow (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: 40.7128, longitude: -74.006 },
-        sensors: [ { id: 90041, parameter: { displayName: "PM2.5", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9005, name: "São Paulo", country: { name: "Brasil", code: "BR" }, provider: { name: "CETESB (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: -23.5505, longitude: -46.6333 },
-        sensors: [ { id: 90051, parameter: { displayName: "PM2.5", units: "µg/m³" } }, { id: 90052, parameter: { displayName: "CO", units: "mg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9006, name: "Nairobi", country: { name: "Kenia", code: "KE" }, provider: { name: "UNEP (simulado)" }, isMonitor: false, isMobile: false, coordinates: { latitude: -1.2921, longitude: 36.8219 },
-        sensors: [ { id: 90061, parameter: { displayName: "PM2.5", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9007, name: "Tokio", country: { name: "Japón", code: "JP" }, provider: { name: "MOE Japan (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: 35.6762, longitude: 139.6503 },
-        sensors: [ { id: 90071, parameter: { displayName: "PM2.5", units: "µg/m³" } }, { id: 90072, parameter: { displayName: "O3", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } },
-      { id: 9008, name: "Sídney", country: { name: "Australia", code: "AU" }, provider: { name: "NSW EPA (simulado)" }, isMonitor: true, isMobile: false, coordinates: { latitude: -33.8688, longitude: 151.2093 },
-        sensors: [ { id: 90081, parameter: { displayName: "PM2.5", units: "µg/m³" } } ],
-        datetimeLast: { utc: new Date().toISOString() } }
+  /* ------------------------- 4. GENERACIÓN DE DATOS ALEATORIOS ------------ */
+  // Simula la respuesta del backend: 5 estaciones con valores aleatorios
+  // pero consistentes durante la sesión (semilla fija para que no cambien
+  // al recargar, pero se puede ajustar)
+  function generateRandomLocations(count) {
+    var locations = [];
+    var cities = [
+      { name: "Quito", country: "Ecuador", code: "EC", lat: -0.1807, lon: -78.4678 },
+      { name: "Bogotá", country: "Colombia", code: "CO", lat: 4.7110, lon: -74.0721 },
+      { name: "Ciudad de México", country: "México", code: "MX", lat: 19.4326, lon: -99.1332 },
+      { name: "Madrid", country: "España", code: "ES", lat: 40.4168, lon: -3.7038 },
+      { name: "Nueva York", country: "Estados Unidos", code: "US", lat: 40.7128, lon: -74.0060 },
+      { name: "São Paulo", country: "Brasil", code: "BR", lat: -23.5505, lon: -46.6333 },
+      { name: "Nairobi", country: "Kenia", code: "KE", lat: -1.2921, lon: 36.8219 },
+      { name: "Tokio", country: "Japón", code: "JP", lat: 35.6762, lon: 139.6503 }
     ];
-    return demo;
+    // Seleccionar aleatoriamente 'count' ciudades (sin repetir)
+    var shuffled = cities.slice().sort(function() { return Math.random() - 0.5; });
+    var selected = shuffled.slice(0, count);
+
+    selected.forEach(function(city, idx) {
+      var id = 1000 + idx;
+      // Parámetros simulados: PM2.5, Temperatura, Humedad, y opcionalmente otros
+      var pm25 = Math.round(5 + Math.random() * 65); // rango 5-70
+      var temp = Math.round(10 + Math.random() * 25); // 10-35 °C
+      var hum = Math.round(30 + Math.random() * 60); // 30-90 %
+      // Algunos sensores adicionales
+      var sensors = [
+        { id: id*10+1, parameter: { displayName: "PM2.5", units: "µg/m³" } },
+        { id: id*10+2, parameter: { displayName: "Temperatura", units: "°C" } },
+        { id: id*10+3, parameter: { displayName: "Humedad", units: "%" } }
+      ];
+      // A veces añadir O3 o NO2
+      if (idx % 2 === 0) {
+        sensors.push({ id: id*10+4, parameter: { displayName: "O3", units: "µg/m³" } });
+      }
+      var loc = {
+        id: id,
+        name: city.name,
+        country: { name: city.country, code: city.code },
+        provider: { name: "Backend Simulado" },
+        isMonitor: true,
+        isMobile: false,
+        coordinates: { latitude: city.lat, longitude: city.lon },
+        sensors: sensors,
+        datetimeLast: { utc: new Date().toISOString() },
+        // Almacenamos los valores simulados para usarlos en la tabla y gráficas
+        _simulatedValues: {
+          pm25: pm25,
+          temp: temp,
+          hum: hum
+        }
+      };
+      locations.push(loc);
+    });
+    return locations;
   }
 
-  function demoLatestFor(location) {
-    // genera lecturas plausibles y estables (semilla = id de la ubicación)
-    var seed = location.id;
-    function rnd(min, max, salt) {
-      var x = Math.sin(seed * 999 + salt) * 10000;
-      var frac = x - Math.floor(x);
-      return +(min + frac * (max - min)).toFixed(1);
-    }
-    return location.sensors.map(function (s, i) {
-      var pName = s.parameter.displayName;
+  // Genera lecturas "latest" para una ubicación (valores actuales)
+  function simulatedLatestFor(location) {
+    var vals = location._simulatedValues;
+    return location.sensors.map(function(s) {
       var val;
-      if (pName === "Temperatura") val = rnd(14, 27, i);
-      else if (pName === "Humedad") val = rnd(35, 80, i);
-      else if (pName === "PM2.5") val = rnd(8, 62, i);
-      else val = rnd(5, 90, i);
+      var pName = s.parameter.displayName;
+      if (pName === "PM2.5") val = vals.pm25;
+      else if (pName === "Temperatura") val = vals.temp;
+      else if (pName === "Humedad") val = vals.hum;
+      else val = Math.round(5 + Math.random() * 50);
       return { sensorsId: s.id, value: val, datetime: { utc: new Date().toISOString() } };
     });
   }
 
-  function demoHoursFor(sensorId) {
+  // Genera series horarias (24h) con variación aleatoria alrededor del valor base
+  function simulatedHoursFor(sensorId, baseValue, variability) {
+    variability = variability || 0.3;
     var out = [];
     var now = Date.now();
     for (var h = 23; h >= 0; h--) {
-      var x = Math.sin(sensorId * 13 + h * 7) * 10000;
-      var frac = x - Math.floor(x);
-      out.push({ value: +(10 + frac * 50).toFixed(1), period: { datetimeFrom: { utc: new Date(now - h * 3600000).toISOString() } } });
+      var variation = 1 + (Math.sin(h * 0.5 + sensorId) * 0.2) + (Math.random() - 0.5) * 0.3;
+      var val = Math.round(baseValue * variation * 10) / 10;
+      val = Math.max(0, val);
+      out.push({
+        value: val,
+        period: { datetimeFrom: { utc: new Date(now - h * 3600000).toISOString() } }
+      });
     }
     return out;
   }
 
-  /* ------------------------- 6. PROYECCIÓN DE COORDENADAS ------------------ */
-  // Proyección Web Mercator (la misma familia que usa Google Maps) para que
-  // los pines superpuestos coincidan razonablemente con el iframe del mapa.
+  /* ------------------------- 5. PROYECCIÓN DE COORDENADAS ------------------ */
   function projectLatLon(lat, lon) {
     var x = (lon + 180) / 360 * 100;
     var latRad = Math.max(-85, Math.min(85, lat)) * Math.PI / 180;
@@ -395,7 +348,7 @@
     return { x: x, y: Math.min(97, Math.max(3, y)) };
   }
 
-  /* ------------------------- 7. CLASIFICACIÓN DE CALIDAD ------------------- */
+  /* ------------------------- 6. CLASIFICACIÓN DE CALIDAD ------------------- */
   function levelFromPM25(value) {
     if (value == null || isNaN(value)) return "desconocido";
     if (value >= PM25_BAD_THRESHOLD) return "malo";
@@ -410,7 +363,7 @@
     });
   }
 
-  /* ------------------------- 8. RENDER: TARJETAS --------------------------- */
+  /* ------------------------- 7. RENDER: TARJETAS --------------------------- */
   function renderCards(locations, summary) {
     $("#cardTotalDevices").textContent = locations.length;
     $("#cardAlerts").textContent = summary.alerts;
@@ -436,7 +389,7 @@
     $("#lastUpdatedHint").textContent = "Actualizado " + new Date().toLocaleTimeString("es-EC");
   }
 
-  /* ------------------------- 9. RENDER: MAPA -------------------------------- */
+  /* ------------------------- 8. RENDER: MAPA -------------------------------- */
   function renderMap(locations) {
     var layer = $("#markerLayer");
     layer.innerHTML = "";
@@ -470,13 +423,11 @@
   function applyZoom(delta) {
     state.zoomLevel = Math.min(12, Math.max(1, state.zoomLevel + delta));
     var frame = $("#mapFrame");
-    var srcUrl = new URL(frame.src);
-    // el iframe público de Google Maps acepta el parámetro z para el nivel de zoom
     var base = frame.src.split("&z=")[0].split("?q=")[0];
     frame.src = "https://maps.google.com/maps?q=10,0&z=" + state.zoomLevel + "&output=embed";
   }
 
-  /* ------------------------- 10. RENDER: TABLA ------------------------------ */
+  /* ------------------------- 9. RENDER: TABLA ------------------------------ */
   function paramsSummary(loc) {
     return (loc.sensors || []).map(function (s) { return s.parameter.displayName || s.parameter.name; }).join(", ");
   }
@@ -486,6 +437,7 @@
     body.innerHTML = "";
     if (!locations.length) {
       body.innerHTML = '<tr class="empty-row"><td colspan="6">No se encontraron estaciones para mostrar.</td></tr>';
+      return;
     }
     locations.forEach(function (loc) {
       var tr = document.createElement("tr");
@@ -494,8 +446,14 @@
       tr.setAttribute("role", "button");
       tr.setAttribute("aria-label", "Ver detalles de " + (loc.name || "estación"));
       var lastDate = loc.datetimeLast && loc.datetimeLast.utc ? new Date(loc.datetimeLast.utc) : null;
+      // Obtenemos el valor PM2.5 para mostrar en la tabla
+      var pmSensor = findPM25Sensor(loc);
+      var pmVal = "—";
+      if (pmSensor && loc._simulatedValues) {
+        pmVal = loc._simulatedValues.pm25 + " µg/m³";
+      }
       tr.innerHTML =
-        '<td class="device-id">OPENAQ_' + esc(loc.id) + '</td>' +
+        '<td class="device-id">SIM_' + esc(loc.id) + '</td>' +
         '<td>' + esc(loc.name || "Sin nombre") + '</td>' +
         '<td>' + esc(loc.country ? loc.country.name : "—") + '</td>' +
         '<td>' + esc(paramsSummary(loc) || "—") + '</td>' +
@@ -525,7 +483,7 @@
     });
   }
 
-  /* ------------------------- 11. MINI-GRÁFICAS SVG -------------------------- */
+  /* ------------------------- 10. MINI-GRÁFICAS SVG -------------------------- */
   function barChartSVG(values, unit) {
     if (!values.length) return '<p class="chart-empty">Sin datos históricos disponibles</p>';
     var w = 280, h = 64, pad = 4;
@@ -557,7 +515,7 @@
     });
   }
 
-  /* ------------------------- 12. PANEL DE DETALLE --------------------------- */
+  /* ------------------------- 11. PANEL DE DETALLE --------------------------- */
   function selectLocation(id) {
     var loc = state.locations.find(function (l) { return String(l.id) === String(id); });
     if (!loc) return;
@@ -605,21 +563,18 @@
       chartsContainer.innerHTML = '<p class="chart-empty">Esta estación no reporta sensores.</p>';
       return;
     }
-    if (state.mode === "demo") {
-      var byId = {};
-      sensorsToChart.forEach(function (s) { byId[s.id] = demoHoursFor(s.id); });
-      renderMiniCharts(chartsContainer, sensorsToChart, byId);
-      return;
-    }
-    Promise.all(sensorsToChart.map(function (s) { return fetchSensorHours(s.id); }))
-      .then(function (results) {
-        var byId = {};
-        sensorsToChart.forEach(function (s, i) { byId[s.id] = results[i]; });
-        renderMiniCharts(chartsContainer, sensorsToChart, byId);
-      })
-      .catch(function () {
-        chartsContainer.innerHTML = '<p class="chart-empty">No se pudo cargar el histórico de esta estación.</p>';
-      });
+    // Generar datos horarios simulados para cada sensor
+    var byId = {};
+    sensorsToChart.forEach(function (s) {
+      var baseVal = 0;
+      var pName = s.parameter.displayName;
+      if (pName === "PM2.5") baseVal = loc._simulatedValues.pm25;
+      else if (pName === "Temperatura") baseVal = loc._simulatedValues.temp;
+      else if (pName === "Humedad") baseVal = loc._simulatedValues.hum;
+      else baseVal = 30 + Math.random() * 40;
+      byId[s.id] = simulatedHoursFor(s.id, baseVal, 0.25);
+    });
+    renderMiniCharts(chartsContainer, sensorsToChart, byId);
   }
 
   function closeDetailPanel() {
@@ -629,35 +584,14 @@
     updateTableSelection(null);
   }
 
-  /* ------------------------- 13. RESUMEN GLOBAL (promedio + alertas) ------- */
-  function computeSummaryLive(locations) {
-    var sample = locations.filter(findPM25Sensor).slice(0, SAMPLE_SIZE_FOR_SUMMARY);
-    if (!sample.length) return Promise.resolve({ average: null, alerts: 0 });
-    return Promise.all(sample.map(function (loc) {
-      var sensor = findPM25Sensor(loc);
-      return fetchLatest(loc.id).then(function (readings) {
-        var match = readings.find(function (r) { return String(r.sensorsId) === String(sensor.id); });
-        var val = match ? match.value : null;
-        loc._level = levelFromPM25(val);
-        return val;
-      });
-    })).then(function (values) {
-      var valid = values.filter(function (v) { return v != null && !isNaN(v); });
-      var avg = valid.length ? valid.reduce(function (a, b) { return a + b; }, 0) / valid.length : null;
-      var alerts = valid.filter(function (v) { return v >= PM25_BAD_THRESHOLD; }).length;
-      return { average: avg, alerts: alerts };
-    });
-  }
-
-  function computeSummaryDemo(locations) {
+  /* ------------------------- 12. RESUMEN GLOBAL (promedio + alertas) ------- */
+  function computeSummary(locations) {
     var pmValues = [];
     var alerts = 0;
     locations.forEach(function (loc) {
       var sensor = findPM25Sensor(loc);
       if (!sensor) { loc._level = "desconocido"; return; }
-      var readings = demoLatestFor(loc);
-      var match = readings.find(function (r) { return r.sensorsId === sensor.id; });
-      var val = match ? match.value : null;
+      var val = loc._simulatedValues ? loc._simulatedValues.pm25 : null;
       loc._level = levelFromPM25(val);
       if (val != null) {
         pmValues.push(val);
@@ -668,66 +602,28 @@
     return { average: avg, alerts: alerts };
   }
 
-  /* ------------------------- 14. CARGA PRINCIPAL ---------------------------- */
-  function loadLive(apiKey) {
-    state.apiKey = apiKey;
-    state.mode = "live";
+  /* ------------------------- 13. CARGA PRINCIPAL ---------------------------- */
+  function loadSimulatedData() {
     hideError();
-    setLoading(true, "Consultando /v3/locations en OpenAQ…");
-    fetchLocations()
-      .then(function (locations) {
-        if (!locations.length) {
-          showError("La API respondió correctamente pero no devolvió estaciones. Intenta más tarde.");
-          setLoading(false);
-          return;
-        }
-        state.locations = locations;
-        renderTable(locations);
-        renderMap(locations); // primer render sin niveles de calidad aún
-        setLoading(true, "Calculando promedio global de PM2.5…");
-        return computeSummaryLive(locations).then(function (summary) {
-          renderCards(locations, summary);
-          renderMap(locations); // re-render con niveles (colores) ya calculados
-        });
-      })
-      .then(function () { $("#apiBanner").classList.add("is-hidden"); })
-      .catch(function (err) {
-        setLoading(false);
-        if (err.status === 401) {
-          showError("La clave de API no es válida (HTTP 401). Verifica tu X-API-Key de OpenAQ.");
-        } else {
-          showError("No se pudo conectar con la API de OpenAQ (" + (err.message || "error de red") + "). Revisa tu conexión o intenta con datos de ejemplo.");
-        }
-      });
-  }
-
-  function loadDemo() {
-    state.mode = "demo";
-    hideError();
-    setLoading(true, "Generando datos de ejemplo…");
-    var locations = buildDemoLocations();
+    setLoading(true, "Generando datos simulados…");
+    // Generar exactamente 5 estaciones
+    var locations = generateRandomLocations(5);
     state.locations = locations;
-    var summary = computeSummaryDemo(locations);
+    var summary = computeSummary(locations);
     renderCards(locations, summary);
     renderMap(locations);
     renderTable(locations);
-    $("#apiBanner").classList.add("is-hidden");
-    showToast("Mostrando datos de ejemplo (modo demostración sin conexión).", "success");
+    setLoading(false);
+    showToast("Datos simulados cargados correctamente (5 estaciones).", "success");
   }
 
-  /* ------------------------- 15. EVENTOS DE UI ------------------------------ */
-  $("#apiForm").addEventListener("submit", function (e) {
-    e.preventDefault();
-    var key = $("#apiKeyInput").value.trim();
-    if (!key) { showToast("Ingresa una clave de API válida.", "error"); return; }
-    loadLive(key);
-  });
-
-  $("#demoBtn").addEventListener("click", loadDemo);
+  /* ------------------------- 14. EVENTOS DE UI ------------------------------ */
+  // Los eventos que hacían referencia al formulario de API key se eliminan.
+  // Se mantienen solo los necesarios para la interacción.
 
   $("#errorRetryBtn").addEventListener("click", function () {
-    if (state.mode === "live" && state.apiKey) loadLive(state.apiKey);
-    else hideError();
+    hideError();
+    loadSimulatedData();
   });
 
   $("#detailCloseBtn").addEventListener("click", closeDetailPanel);
@@ -762,6 +658,9 @@
 
   // colapsar el sidebar por defecto en pantallas pequeñas
   if (window.innerWidth <= 860) document.body.classList.add("sidebar-collapsed");
+
+  // ===== INICIO: cargar datos simulados automáticamente =====
+  loadSimulatedData();
 
 })();
 </script>
